@@ -19,28 +19,6 @@ import { ThemeContext } from '../functions/ThemeContext';
 import { supabase } from '../lib/superbase';
 import * as ImagePicker from 'expo-image-picker';
 
-// Task category icons for fallback
-const CATEGORY_ICONS = {
-  work: "briefcase",
-  personal: "user",
-  health: "heartbeat",
-  shopping: "shopping-cart",
-  bills: "file-invoice-dollar",
-  home: "home",
-  default: "tasks"
-};
-
-// Task category colors for generating thumbnails
-const CATEGORY_COLORS = {
-  work: "#4285F4",
-  personal: "#EA4335",
-  health: "#34A853",
-  shopping: "#FBBC05",
-  bills: "#8F44FF",
-  home: "#FF8800",
-  default: "#FF87B2"
-};
-
 export default function TaskDetailScreen({ route, navigation }) {
   const { taskId } = route.params;
   const { theme, isDarkMode } = useContext(ThemeContext);
@@ -54,19 +32,38 @@ export default function TaskDetailScreen({ route, navigation }) {
     category: '',
     is_completed: false,
     photo_url: null,
-    completed_tim: null
+    completed_time: null
   });
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [categories, setCategories] = useState([]);
 
   useEffect(() => {
     fetchTaskDetails();
+    fetchCategories();
   }, [taskId]);
 
   // Reset image error state when image URL changes
   useEffect(() => {
     setImageError(false);
   }, [updatedTask.photo_url]);
+
+  const fetchCategories = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('category')
+        .select('id, cat_name, color');
+
+      if (error) {
+        console.error('Error fetching categories:', error);
+        Alert.alert('Error', 'Failed to load categories');
+      } else if (data) {
+        setCategories(data);
+      }
+    } catch (error) {
+      console.error('Unexpected error fetching categories:', error);
+    }
+  };
 
   const fetchTaskDetails = async () => {
     try {
@@ -85,10 +82,10 @@ export default function TaskDetailScreen({ route, navigation }) {
         setUpdatedTask({
           title: data.title || '',
           description: data.description || '',
-          category: data.category || 'default',
+          category: data.category || '',
           is_completed: data.is_completed || false,
           photo_url: data.photo_url || null,
-          completed_tim: data.completed_tim || null
+          completed_time: data.completed_time || null
         });
       }
     } catch (error) {
@@ -136,37 +133,37 @@ export default function TaskDetailScreen({ route, navigation }) {
   };
 
   const toggleComplete = async () => {
-  try {
-    const newStatus = !updatedTask.is_completed;
-    
-    // Format the time correctly for 'time with time zone' data type
-    let completedTime = null;
-    if (newStatus) {
-      const now = new Date();
-      // Format as HH:MM:SS±TZ which is valid for 'time with time zone'
-      completedTime = now.toTimeString().split(' ')[0] + now.toTimeString().match(/GMT[+-]\d{4}/)[0].replace('GMT', '');
-    }
-    
-    const { error } = await supabase
-      .from('tasks')
-      .update({ 
-        is_completed: newStatus,
-        completed_time: completedTime 
-      })
-      .eq('id', taskId);
+    try {
+      const newStatus = !updatedTask.is_completed;
+      
+      // Format the time correctly for 'time with time zone' data type
+      let completedTime = null;
+      if (newStatus) {
+        const now = new Date();
+        // Format as HH:MM:SS±TZ which is valid for 'time with time zone'
+        completedTime = now.toTimeString().split(' ')[0] + now.toTimeString().match(/GMT[+-]\d{4}/)[0].replace('GMT', '');
+      }
+      
+      const { error } = await supabase
+        .from('tasks')
+        .update({ 
+          is_completed: newStatus,
+          completed_time: completedTime 
+        })
+        .eq('id', taskId);
 
-    if (error) {
-      console.error('Error updating task status:', error);
-      Alert.alert('Error', 'Failed to update task status');
-    } else {
-      setTask({ ...task, is_completed: newStatus, completed_time: completedTime });
-      setUpdatedTask({ ...updatedTask, is_completed: newStatus, completed_time: completedTime });
+      if (error) {
+        console.error('Error updating task status:', error);
+        Alert.alert('Error', 'Failed to update task status');
+      } else {
+        setTask({ ...task, is_completed: newStatus, completed_time: completedTime });
+        setUpdatedTask({ ...updatedTask, is_completed: newStatus, completed_time: completedTime });
+      }
+    } catch (error) {
+      console.error('Unexpected error:', error);
+      Alert.alert('Error', 'An unexpected error occurred');
     }
-  } catch (error) {
-    console.error('Unexpected error:', error);
-    Alert.alert('Error', 'An unexpected error occurred');
-  }
-};
+  };
 
   const deleteTask = async () => {
     Alert.alert(
@@ -283,32 +280,43 @@ export default function TaskDetailScreen({ route, navigation }) {
   };
 
   const changeCategory = () => {
-    // Simple modal-like alert for category selection
+    // Show alert with categories fetched from database
+    if (categories.length === 0) {
+      Alert.alert('Error', 'No categories available. Please try again later.');
+      return;
+    }
+
+    // Create options from categories
+    const options = categories.map(category => ({
+      text: category.cat_name,
+      onPress: () => {
+        setUpdatedTask({ ...updatedTask, category: category.id });
+        
+        if (!isEditing) {
+          // If not in edit mode, update immediately
+          supabase
+            .from('tasks')
+            .update({ category: category.id })
+            .eq('id', taskId)
+            .then(({ error }) => {
+              if (error) {
+                console.error('Error updating category:', error);
+                Alert.alert('Error', 'Failed to update category');
+              } else {
+                setTask({ ...task, category: category.id });
+              }
+            });
+        }
+      }
+    }));
+
+    // Add cancel option
+    options.push({ text: 'Cancel', style: 'cancel' });
+
     Alert.alert(
       'Select Category',
       'Choose a category for this task',
-      Object.keys(CATEGORY_ICONS).map(category => ({
-        text: category.charAt(0).toUpperCase() + category.slice(1),
-        onPress: () => {
-          setUpdatedTask({ ...updatedTask, category });
-          
-          if (!isEditing) {
-            // If not in edit mode, update immediately
-            supabase
-              .from('tasks')
-              .update({ category })
-              .eq('id', taskId)
-              .then(({ error }) => {
-                if (error) {
-                  console.error('Error updating category:', error);
-                  Alert.alert('Error', 'Failed to update category');
-                } else {
-                  setTask({ ...task, category });
-                }
-              });
-          }
-        }
-      }))
+      options
     );
   };
 
@@ -324,6 +332,14 @@ export default function TaskDetailScreen({ route, navigation }) {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  // Get category details by ID
+  const getCategoryById = (categoryId) => {
+    if (!categoryId) return { cat_name: 'Uncategorized', color: '#808080', icon: 'tasks' };
+    
+    const category = categories.find(cat => cat.id === categoryId);
+    return category || { cat_name: 'Uncategorized', color: '#808080', icon: 'tasks' };
   };
 
   const renderTaskImage = () => {
@@ -387,8 +403,9 @@ export default function TaskDetailScreen({ route, navigation }) {
       );
     } else {
       // Render category icon as fallback
-      const iconName = CATEGORY_ICONS[updatedTask.category] || CATEGORY_ICONS.default;
-      const backgroundColor = CATEGORY_COLORS[updatedTask.category] || CATEGORY_COLORS.default;
+      const categoryDetails = getCategoryById(updatedTask.category);
+      const iconName = categoryDetails.icon || 'tasks';
+      const backgroundColor = categoryDetails.color || '#808080';
       
       return (
         <TouchableOpacity 
@@ -424,6 +441,9 @@ export default function TaskDetailScreen({ route, navigation }) {
       </SafeAreaView>
     );
   }
+
+  // Get current category details
+  const currentCategory = getCategoryById(updatedTask.category);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -534,15 +554,15 @@ export default function TaskDetailScreen({ route, navigation }) {
               onPress={changeCategory}
             >
               <View style={[styles.categoryBadge, { 
-                backgroundColor: CATEGORY_COLORS[updatedTask.category] || CATEGORY_COLORS.default 
+                backgroundColor: currentCategory.color || '#808080' 
               }]}>
                 <FontAwesome5 
-                  name={CATEGORY_ICONS[updatedTask.category] || CATEGORY_ICONS.default} 
+                  name={currentCategory.icon || 'tasks'} 
                   size={16} 
                   color="white" 
                 />
                 <Text style={styles.categoryText}>
-                  {updatedTask.category.charAt(0).toUpperCase() + updatedTask.category.slice(1)}
+                  {currentCategory.cat_name || 'Uncategorized'}
                 </Text>
               </View>
               <Text style={[styles.changeCategoryText, { color: theme.colors.primary }]}>

@@ -39,9 +39,8 @@ const CATEGORY_ICONS = {
   home: "home",
   default: "tasks"
 };
-
-// Task category colors for generating thumbnails
-const CATEGORY_COLORS = {
+// Define default colors in case we can't fetch them from the database
+const DEFAULT_CATEGORY_COLORS = {
   work: "#4285F4",
   personal: "#EA4335",
   health: "#34A853",
@@ -65,15 +64,17 @@ export default function DashboardScreen({ navigation }) {
   const [locationPermission, setLocationPermission] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
   const [nearbyTaskIds, setNearbyTaskIds] = useState([]);
+  const [categoryColors, setCategoryColors] = useState(DEFAULT_CATEGORY_COLORS);
 
   // Request location permissions on mount
   useEffect(() => {
     requestLocationPermission();
   }, []);
 
-  // Fetch tasks on mount
+  // Fetch tasks and categories on mount
   useEffect(() => {
     fetchTasks();
+    fetchCategories();
   }, []);
 
   // Check for nearby tasks when location or tasks change
@@ -82,6 +83,43 @@ export default function DashboardScreen({ navigation }) {
       checkNearbyTasks();
     }
   }, [userLocation, tasks]);
+
+  // Fetch categories including colors from Supabase
+const fetchCategories = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('category')
+      .select('cat_name, color');
+
+    if (error) {
+      console.error('Error fetching categories:', error);
+      // If there's an error, we'll use the default colors
+    } else if (data && data.length > 0) {
+      // Transform the data into a format we can use
+      const colorsFromDB = {};
+      data.forEach(category => {
+        // Use cat_name instead of name to match your database schema
+        colorsFromDB[category.cat_name] = category.color;
+      });
+      
+      // Make sure we have a 'default' category
+      if (!colorsFromDB.default) {
+        colorsFromDB.default = DEFAULT_CATEGORY_COLORS.default;
+      }
+      
+      // Update state with colors from database
+      setCategoryColors(prevColors => ({
+        ...prevColors,  // Keep default colors as fallback
+        ...colorsFromDB  // Override with colors from DB
+      }));
+      
+      console.log('Categories fetched:', colorsFromDB);
+    }
+  } catch (err) {
+    console.error('Unexpected error fetching categories:', err);
+    // We'll use the default colors if there's an error
+  }
+};
 
   // Check for nearby tasks
   const checkNearbyTasks = async () => {
@@ -158,6 +196,7 @@ export default function DashboardScreen({ navigation }) {
 
   const onRefresh = () => {
     fetchTasks();
+    fetchCategories(); // Also refresh categories when pulling to refresh
   };
 
   const openMenu = () => {
@@ -466,7 +505,9 @@ export default function DashboardScreen({ navigation }) {
     } else {
       // If no image, show a category icon with background color
       const iconName = CATEGORY_ICONS[task.category] || CATEGORY_ICONS.default;
-      const backgroundColor = CATEGORY_COLORS[task.category] || CATEGORY_COLORS.default;
+      
+      // Use color from our dynamically loaded categoryColors state
+      const backgroundColor = categoryColors[task.category] || categoryColors.default;
       
       return (
         <TouchableOpacity 
@@ -780,14 +821,14 @@ export default function DashboardScreen({ navigation }) {
               <View style={styles.menuDivider} />
               
               <Text style={[styles.menuTitle, { color: theme.colors.primary }]}>Categories</Text>
-              {Object.keys(CATEGORY_ICONS).map(category => (
+              {Object.keys(categoryColors).map(category => (
                 <TouchableOpacity 
                   key={category} 
                   style={styles.categoryItem}
                   onPress={() => {
                   }}
                 >
-                  <View style={[styles.categoryColor, { backgroundColor: CATEGORY_COLORS[category] }]} />
+                  <View style={[styles.categoryColor, { backgroundColor: categoryColors[category] }]} />
                   <Text style={{ color: theme.colors.text, textTransform: 'capitalize' }}>{category}</Text>
                 </TouchableOpacity>
               ))}

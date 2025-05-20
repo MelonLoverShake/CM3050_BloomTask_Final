@@ -230,10 +230,10 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#4CD790', // Mint color
+    color: '#4CD790', 
   },
   logoAccent: {
-    color: '#FF8A9B', // Pink color from your theme
+    color: '#FF8A9B', 
   },
   logoIcon: {
     width: 32, 
