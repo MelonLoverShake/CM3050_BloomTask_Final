@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "BloomTask",
+    "slug": "BloomTask",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/App_Logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/App_Logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F0E6FF"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/App_Logo.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
