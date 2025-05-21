@@ -24,6 +24,9 @@ My backend database is supabase, a cloud-based database.
 You may login to my application using the account I have previously set up in order for your assessment.
 
 Email: testat1@gmail.com
+
 Password: 123456
+
+Snack-Demo: https://snack.expo.dev/@yee_chong/bloomtask
 
 Thank you!
