@@ -55,8 +55,6 @@ export default function DashboardScreen({ navigation }) {
 
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
-  const [editingTaskId, setEditingTaskId] = useState(null);
-  const [editingText, setEditingText] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [updatingTaskIds, setUpdatingTaskIds] = useState([]);
@@ -336,38 +334,6 @@ const fetchCategories = async () => {
     }
   };
 
-  const startEditing = (id, text) => {
-    setEditingTaskId(id);
-    setEditingText(text);
-  };
-
-  const finishEditing = async () => {
-    if (!editingTaskId) return;
-
-    try {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ title: editingText })
-        .eq('id', editingTaskId);
-
-      if (error) {
-        console.error('Error editing task:', error);
-        Alert.alert('Error', 'Failed to update task. Please try again.');
-      } else {
-        setTasks(prev => 
-          prev.map(task => 
-            task.id === editingTaskId ? { ...task, text: editingText } : task
-          )
-        );
-      }
-    } catch (err) {
-      console.error('Unexpected error editing task:', err);
-      Alert.alert('Error', 'Something went wrong while updating the task.');
-    } finally {
-      setEditingTaskId(null);
-    }
-  };
-
   const pickImage = async (taskId) => {
     // Request permissions
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -579,60 +545,35 @@ const fetchCategories = async () => {
             )}
           </TouchableOpacity>
 
-          {editingTaskId === item.id ? (
-            <TextInput
-              style={[styles.editInput, { 
-                color: theme.colors.text,
-                borderBottomColor: theme.colors.primary 
-              }]}
-              value={editingText}
-              onChangeText={setEditingText}
-              onBlur={finishEditing}
-              onSubmitEditing={finishEditing}
-              autoFocus
-              accessibilityLabel="Edit task text"
-              accessibilityHint="Edit the task and press return to save"
-            />
-          ) : (
-            <View style={styles.taskTextRow}>
-              <TouchableOpacity 
-                style={styles.taskTextContainer}
-                onPress={(e) => {
-                  e.stopPropagation(); // Prevent triggering the parent's onPress
-                  startEditing(item.id, item.text);
-                }}
-                disabled={isUpdating}
-                accessibilityLabel="Double tap to edit task"
-                accessibilityHint="Double tap to edit this task's text"
+          <View style={styles.taskTextRow}>
+            <View style={styles.taskTextContainer}>
+              <Text 
+                style={[
+                  styles.taskText, 
+                  { color: theme.colors.text },
+                  item.completed && styles.completedTaskText,
+                  isUpdating && { opacity: 0.7 }
+                ]}
               >
-                <Text 
-                  style={[
-                    styles.taskText, 
-                    { color: theme.colors.text },
-                    item.completed && styles.completedTaskText,
-                    isUpdating && { opacity: 0.7 }
-                  ]}
-                >
-                  {item.text}
-                </Text>
-              </TouchableOpacity>
-              
-              <View style={styles.taskIndicators}>
-                {isNearby && (
-                  <NearbyTaskIndicator theme={theme} />
-                )}
-                
-                {hasLocation && !isNearby && (
-                  <Feather 
-                    name="map-pin" 
-                    size={14} 
-                    color={theme.colors.primary} 
-                    style={styles.locationIcon}
-                  />
-                )}
-              </View>
+                {item.text}
+              </Text>
             </View>
-          )}
+            
+            <View style={styles.taskIndicators}>
+              {isNearby && (
+                <NearbyTaskIndicator theme={theme} />
+              )}
+              
+              {hasLocation && !isNearby && (
+                <Feather 
+                  name="map-pin" 
+                  size={14} 
+                  color={theme.colors.primary} 
+                  style={styles.locationIcon}
+                />
+              )}
+            </View>
+          </View>
           
           <View style={styles.actionsContainer}>
             <TouchableOpacity

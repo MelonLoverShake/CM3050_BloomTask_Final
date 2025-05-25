@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ActionSheetIOS,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Feather, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
@@ -29,7 +30,7 @@ export default function TaskDetailScreen({ route, navigation }) {
   const [updatedTask, setUpdatedTask] = useState({
     title: '',
     description: '',
-    category: '',
+    cat_id: '', // Changed from 'category' to 'cat_id'
     is_completed: false,
     photo_url: null,
     completed_time: null
@@ -82,7 +83,7 @@ export default function TaskDetailScreen({ route, navigation }) {
         setUpdatedTask({
           title: data.title || '',
           description: data.description || '',
-          category: data.category || '',
+          cat_id: data.cat_id || '', // Changed from 'category' to 'cat_id'
           is_completed: data.is_completed || false,
           photo_url: data.photo_url || null,
           completed_time: data.completed_time || null
@@ -103,7 +104,7 @@ export default function TaskDetailScreen({ route, navigation }) {
         .update({
           title: updatedTask.title,
           description: updatedTask.description,
-          category: updatedTask.category,
+          cat_id: updatedTask.cat_id, // Changed from 'category' to 'cat_id'
           is_completed: updatedTask.is_completed,
           photo_url: updatedTask.photo_url,
           completed_time: updatedTask.completed_time
@@ -118,7 +119,7 @@ export default function TaskDetailScreen({ route, navigation }) {
           ...task,
           title: updatedTask.title,
           description: updatedTask.description,
-          category: updatedTask.category,
+          cat_id: updatedTask.cat_id, // Changed from 'category' to 'cat_id'
           is_completed: updatedTask.is_completed,
           photo_url: updatedTask.photo_url,
           completed_time: updatedTask.completed_time
@@ -280,44 +281,115 @@ export default function TaskDetailScreen({ route, navigation }) {
   };
 
   const changeCategory = () => {
-    // Show alert with categories fetched from database
+    // Show better UI for category selection based on platform
     if (categories.length === 0) {
       Alert.alert('Error', 'No categories available. Please try again later.');
       return;
     }
 
-    // Create options from categories
-    const options = categories.map(category => ({
-      text: category.cat_name,
-      onPress: () => {
-        setUpdatedTask({ ...updatedTask, category: category.id });
-        
-        if (!isEditing) {
-          // If not in edit mode, update immediately
-          supabase
-            .from('tasks')
-            .update({ category: category.id })
-            .eq('id', taskId)
-            .then(({ error }) => {
-              if (error) {
-                console.error('Error updating category:', error);
-                Alert.alert('Error', 'Failed to update category');
-              } else {
-                setTask({ ...task, category: category.id });
-              }
-            });
+    if (Platform.OS === 'ios') {
+      // Use ActionSheetIOS for a native iOS experience
+      const categoryNames = categories.map(category => category.cat_name);
+      categoryNames.push('Cancel');
+      
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: categoryNames,
+          cancelButtonIndex: categoryNames.length - 1,
+          title: 'Select Category',
+          message: 'Choose a category for this task',
+          userInterfaceStyle: isDarkMode ? 'dark' : 'light',
+        },
+        (buttonIndex) => {
+          // Handle category selection
+          if (buttonIndex !== categoryNames.length - 1) { // Not cancel
+            const selectedCategory = categories[buttonIndex];
+            setUpdatedTask({ ...updatedTask, cat_id: selectedCategory.id });
+            
+            if (!isEditing) {
+              // If not in edit mode, update immediately
+              supabase
+                .from('tasks')
+                .update({ cat_id: selectedCategory.id })
+                .eq('id', taskId)
+                .then(({ error }) => {
+                  if (error) {
+                    console.error('Error updating category:', error);
+                    Alert.alert('Error', 'Failed to update category');
+                  } else {
+                    setTask({ ...task, cat_id: selectedCategory.id });
+                  }
+                });
+            }
+          }
         }
-      }
-    }));
-
-    // Add cancel option
-    options.push({ text: 'Cancel', style: 'cancel' });
-
-    Alert.alert(
-      'Select Category',
-      'Choose a category for this task',
-      options
-    );
+      );
+    } else {
+      // For Android, use an enhanced Alert dialog with better styling
+      // Create buttons from categories with maximum 6 options per screen to avoid overcrowding
+      const MAX_OPTIONS_PER_SCREEN = 6;
+      const totalCategories = categories.length;
+      let currentIndex = 0;
+      
+      const showCategoryPage = (startIndex) => {
+        const endIndex = Math.min(startIndex + MAX_OPTIONS_PER_SCREEN, totalCategories);
+        const currentCategories = categories.slice(startIndex, endIndex);
+        
+        // Create buttons for current page of categories
+        const buttons = currentCategories.map(category => ({
+          text: category.cat_name,
+          // Add color indicator for better visual differentiation
+          style: { color: category.color, fontWeight: 'bold' },
+          onPress: () => {
+            setUpdatedTask({ ...updatedTask, cat_id: category.id });
+            
+            if (!isEditing) {
+              // If not in edit mode, update immediately
+              supabase
+                .from('tasks')
+                .update({ cat_id: category.id })
+                .eq('id', taskId)
+                .then(({ error }) => {
+                  if (error) {
+                    console.error('Error updating category:', error);
+                    Alert.alert('Error', 'Failed to update category');
+                  } else {
+                    setTask({ ...task, cat_id: category.id });
+                  }
+                });
+            }
+          }
+        }));
+        
+        // Add navigation buttons if needed
+        if (startIndex > 0) {
+          buttons.push({
+            text: '« Previous Categories',
+            onPress: () => showCategoryPage(startIndex - MAX_OPTIONS_PER_SCREEN)
+          });
+        }
+        
+        if (endIndex < totalCategories) {
+          buttons.push({
+            text: 'More Categories »',
+            onPress: () => showCategoryPage(endIndex)
+          });
+        }
+        
+        // Add cancel button
+        buttons.push({ text: 'Cancel', style: 'cancel' });
+        
+        // Show the alert
+        Alert.alert(
+          'Select Category',
+          'Choose a category for this task:',
+          buttons
+        );
+      };
+      
+      // Start with the first page of categories
+      showCategoryPage(0);
+    }
   };
 
   // Helper function to format date for display
@@ -340,6 +412,41 @@ export default function TaskDetailScreen({ route, navigation }) {
     
     const category = categories.find(cat => cat.id === categoryId);
     return category || { cat_name: 'Uncategorized', color: '#808080', icon: 'tasks' };
+  };
+
+  // Render category selection button with nicer styling
+  const renderCategoryButton = () => {
+    const currentCategory = getCategoryById(updatedTask.cat_id);
+    
+    return (
+      <TouchableOpacity 
+        style={styles.categoryButtonContainer}
+        onPress={changeCategory}
+        activeOpacity={0.7}
+      >
+        <View style={styles.categoryButtonContent}>
+          <View style={[styles.categoryBadge, { 
+            backgroundColor: currentCategory.color || '#808080' 
+          }]}>
+            <FontAwesome5 
+              name={currentCategory.icon || 'tasks'} 
+              size={16} 
+              color="white" 
+            />
+            <Text style={styles.categoryText}>
+              {currentCategory.cat_name || 'Uncategorized'}
+            </Text>
+          </View>
+          
+          <View style={styles.categoryChangeContainer}>
+            <Text style={[styles.changeCategoryText, { color: theme.colors.primary }]}>
+              Change
+            </Text>
+            <MaterialIcons name="arrow-drop-down" size={24} color={theme.colors.primary} />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   const renderTaskImage = () => {
@@ -403,7 +510,7 @@ export default function TaskDetailScreen({ route, navigation }) {
       );
     } else {
       // Render category icon as fallback
-      const categoryDetails = getCategoryById(updatedTask.category);
+      const categoryDetails = getCategoryById(updatedTask.cat_id); // Changed from 'category' to 'cat_id'
       const iconName = categoryDetails.icon || 'tasks';
       const backgroundColor = categoryDetails.color || '#808080';
       
@@ -443,7 +550,7 @@ export default function TaskDetailScreen({ route, navigation }) {
   }
 
   // Get current category details
-  const currentCategory = getCategoryById(updatedTask.category);
+  const currentCategory = getCategoryById(updatedTask.cat_id); // Changed from 'category' to 'cat_id'
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -549,26 +656,7 @@ export default function TaskDetailScreen({ route, navigation }) {
             <Text style={[styles.sectionTitle, { color: theme.colors.secondaryText }]}>
               Category
             </Text>
-            <TouchableOpacity 
-              style={styles.categoryContainer}
-              onPress={changeCategory}
-            >
-              <View style={[styles.categoryBadge, { 
-                backgroundColor: currentCategory.color || '#808080' 
-              }]}>
-                <FontAwesome5 
-                  name={currentCategory.icon || 'tasks'} 
-                  size={16} 
-                  color="white" 
-                />
-                <Text style={styles.categoryText}>
-                  {currentCategory.cat_name || 'Uncategorized'}
-                </Text>
-              </View>
-              <Text style={[styles.changeCategoryText, { color: theme.colors.primary }]}>
-                Change Category
-              </Text>
-            </TouchableOpacity>
+            {renderCategoryButton()}
           </View>
 
           {/* Task Description */}
