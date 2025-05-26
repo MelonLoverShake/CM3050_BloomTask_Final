@@ -19,6 +19,7 @@ import { Feather, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import { ThemeContext } from '../functions/ThemeContext';
 import { supabase } from '../lib/superbase';
 import * as ImagePicker from 'expo-image-picker';
+import PomodoroTimer from '../screens/PomodoroTimer'; 
 
 export default function TaskDetailScreen({ route, navigation }) {
   const { taskId } = route.params;
@@ -38,6 +39,8 @@ export default function TaskDetailScreen({ route, navigation }) {
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [categories, setCategories] = useState([]);
+  const [showPomodoro, setShowPomodoro] = useState(false);
+  const [isTimerActive, setIsTimerActive] = useState(false);
 
   useEffect(() => {
     fetchTaskDetails();
@@ -48,6 +51,15 @@ export default function TaskDetailScreen({ route, navigation }) {
   useEffect(() => {
     setImageError(false);
   }, [updatedTask.photo_url]);
+
+  const handlePomodoroComplete = (taskId, wasWorkSession) =>{
+    if (wasWorkSession){
+      console.log('Pomodoro completed for task:', taskId)
+
+
+
+    }
+  };
 
   const fetchCategories = async () => {
     try {
@@ -406,6 +418,18 @@ export default function TaskDetailScreen({ route, navigation }) {
     });
   };
 
+  // Add this function to handle task updates from pomodoro
+const handleTaskUpdate = (taskId, updates) => {
+  setTask(prevTask => ({
+    ...prevTask,
+    ...updates
+  }));
+  setUpdatedTask(prevTask => ({
+    ...prevTask,
+    ...updates
+  }));
+};
+
   // Get category details by ID
   const getCategoryById = (categoryId) => {
     if (!categoryId) return { cat_name: 'Uncategorized', color: '#808080', icon: 'tasks' };
@@ -694,6 +718,56 @@ export default function TaskDetailScreen({ route, navigation }) {
             <Feather name="trash-2" size={20} color="white" />
             <Text style={styles.deleteButtonText}>Delete Task</Text>
           </TouchableOpacity>
+          {/* Pomodoro Timer Section */}
+<View style={styles.section}>
+  <TouchableOpacity 
+    style={styles.pomodoroHeader}
+    onPress={() => setShowPomodoro(!showPomodoro)}
+    activeOpacity={0.7}
+  >
+    <View style={styles.pomodoroHeaderLeft}>
+      <MaterialIcons 
+        name="timer" 
+        size={20} 
+        color={theme.colors.primary} 
+      />
+      <Text style={[styles.sectionTitle, { color: theme.colors.secondaryText, marginBottom: 0, marginLeft: 8 }]}>
+        Focus Timer
+      </Text>
+    </View>
+    
+    <View style={styles.pomodoroHeaderRight}>
+      {task.pomodoros > 0 && (
+        <Text style={[styles.pomodoroSummary, { color: theme.colors.primary }]}>
+          🍅 {task.pomodoros} completed
+        </Text>
+      )}
+      <MaterialIcons 
+        name={showPomodoro ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
+        size={24} 
+        color={theme.colors.primary} 
+      />
+    </View>
+  </TouchableOpacity>
+  
+  {showPomodoro && (
+    <View style={[styles.pomodoroContainer, { 
+      backgroundColor: theme.colors.inputBackground,
+      borderColor: theme.colors.border 
+    }]}>
+      <PomodoroTimer
+        task={{
+          id: task.id,
+          title: task.title,
+          pomodoros: task.pomodoros || 0
+        }}
+        onPomodoroComplete={handlePomodoroComplete}
+        onUpdateTask={handleTaskUpdate}
+        theme={theme}
+      />
+    </View>
+  )}
+</View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -897,4 +971,31 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
   },
+
+  pomodoroHeader: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  paddingVertical: 12,
+  paddingHorizontal: 4,
+},
+pomodoroHeaderLeft: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+pomodoroHeaderRight: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+pomodoroSummary: {
+  fontSize: 12,
+  fontWeight: '500',
+  marginRight: 8,
+},
+pomodoroContainer: {
+  marginTop: 12,
+  padding: 16,
+  borderRadius: 12,
+  borderWidth: 1,
+}
 });
