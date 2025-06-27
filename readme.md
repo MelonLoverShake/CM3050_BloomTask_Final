@@ -20,6 +20,7 @@ To go into the folder, you shall **cd BloomTask** in your terminal before starti
 
 #### Important Info:
 My backend database is supabase, a cloud-based database.
+Video Demo Link: https://youtube.com/shorts/tvCNEQ4pWjw?feature=share
 
 You may login to my application using the account I have previously set up in order for your assessment.
 
