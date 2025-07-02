@@ -17,6 +17,15 @@ const CreateTaskScreen = ({ navigation, route }) => {
   const [photo, setPhoto] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [userId, setUserId] = useState(null);
+  
+  // Holiday-related state
+  const [holidays, setHolidays] = useState([]);
+  const [loadingHolidays, setLoadingHolidays] = useState(false);
+  const [holidayWarning, setHolidayWarning] = useState(null);
+
+  // Calendarific API configuration
+  const CALENDARIFIC_API_KEY = 'GOu3avWFmorc8Q7u3KIbRyvARxDspidN'; // Replace with your actual API key
+  const COUNTRY_CODE = 'SG'; // Singapore - change based on user location
 
   useEffect(() => {
     // Get the current user ID
@@ -69,6 +78,133 @@ const CreateTaskScreen = ({ navigation, route }) => {
     })();
   }, []);
 
+  // Fetch holidays from Calendarific API
+  const fetchHolidays = async (year) => {
+    if (!CALENDARIFIC_API_KEY) {
+      console.warn('Calendarific API key not configured');
+      return [];
+    }
+
+    try {
+      setLoadingHolidays(true);
+      const response = await fetch(
+        `https://calendarific.com/api/v2/holidays?api_key=${CALENDARIFIC_API_KEY}&country=${COUNTRY_CODE}&year=${year}&type=national,local`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.meta.code === 200) {
+        return data.response.holidays.map(holiday => ({
+          name: holiday.name,
+          description: holiday.description,
+          date: new Date(holiday.date.iso),
+          type: holiday.type,
+          primary_type: holiday.primary_type,
+          country: holiday.country,
+          locations: holiday.locations
+        }));
+      } else {
+        console.error('Calendarific API error:', data.meta.error_detail);
+        return [];
+      }
+    } catch (error) {
+      console.error('Error fetching holidays:', error);
+      return [];
+    } finally {
+      setLoadingHolidays(false);
+    }
+  };
+
+  // Check if a date is a holiday
+  const isHoliday = (date) => {
+    if (!date || holidays.length === 0) return null;
+    
+    return holidays.find(holiday => {
+      const holidayDate = holiday.date;
+      return (
+        holidayDate.getDate() === date.getDate() &&
+        holidayDate.getMonth() === date.getMonth() &&
+        holidayDate.getFullYear() === date.getFullYear()
+      );
+    });
+  };
+
+  // Check if a date is close to a holiday (within 1 day)
+  const isNearHoliday = (date) => {
+    if (!date || holidays.length === 0) return null;
+    
+    const dayBefore = new Date(date);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    
+    const dayAfter = new Date(date);
+    dayAfter.setDate(dayAfter.getDate() + 1);
+    
+    return holidays.find(holiday => {
+      const holidayDate = holiday.date;
+      return (
+        (holidayDate.getDate() === dayBefore.getDate() && 
+         holidayDate.getMonth() === dayBefore.getMonth() &&
+         holidayDate.getFullYear() === dayBefore.getFullYear()) ||
+        (holidayDate.getDate() === dayAfter.getDate() && 
+         holidayDate.getMonth() === dayAfter.getMonth() &&
+         holidayDate.getFullYear() === dayAfter.getFullYear())
+      );
+    });
+  };
+
+  // Generate holiday warning message
+  const generateHolidayWarning = (selectedDate) => {
+    if (!selectedDate) return null;
+
+    const holiday = isHoliday(selectedDate);
+    const nearHoliday = isNearHoliday(selectedDate);
+
+    if (holiday) {
+      return {
+        type: 'holiday',
+        message: `${formatDate(selectedDate)} is ${holiday.name}. Consider setting a lighter task or adjusting the deadline.`,
+        icon: 'calendar',
+        color: '#FF6B6B'
+      };
+    }
+
+    if (nearHoliday) {
+      return {
+        type: 'near-holiday',
+        message: `This date is close to ${nearHoliday.name} (${formatDate(nearHoliday.date)}). You might want to consider the holiday schedule.`,
+        icon: 'info',
+        color: '#FFA726'
+      };
+    }
+
+    // Check if it's a weekend
+    const dayOfWeek = selectedDate.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return {
+        type: 'weekend',
+        message: 'This falls on a weekend. Consider if this affects your task completion.',
+        icon: 'calendar',
+        color: '#42A5F5'
+      };
+    }
+
+    return null;
+  };
+
+  // Update holiday warning when due date changes
+  useEffect(() => {
+    if (dueDate) {
+      const warning = generateHolidayWarning(dueDate);
+      setHolidayWarning(warning);
+    } else {
+      setHolidayWarning(null);
+    }
+  }, [dueDate, holidays]);
+
   const handleCreateTask = async () => {
     if (!title.trim()) {
       Alert.alert('Error', 'Please enter a task title');
@@ -80,6 +216,23 @@ const CreateTaskScreen = ({ navigation, route }) => {
       return;
     }
 
+    // Show holiday confirmation if applicable
+    if (holidayWarning && holidayWarning.type === 'holiday') {
+      Alert.alert(
+        'Holiday Notice',
+        `${holidayWarning.message}\n\nDo you want to proceed with this date?`,
+        [
+          { text: 'Change Date', style: 'cancel' },
+          { text: 'Proceed', onPress: () => createTask() }
+        ]
+      );
+      return;
+    }
+
+    createTask();
+  };
+
+  const createTask = async () => {
     try {
       // Start with basic task data
       const taskData = {
@@ -90,8 +243,20 @@ const CreateTaskScreen = ({ navigation, route }) => {
         is_completed: false,
         due_date: dueDate,
         due_status: dueDate ? dueDate < new Date() : false,
-        user_id: userId, 
+        user_id: userId,
       };
+
+      // Add holiday metadata if applicable
+      if (dueDate) {
+        const holiday = isHoliday(dueDate);
+        if (holiday) {
+          taskData.holiday_info = JSON.stringify({
+            holiday_name: holiday.name,
+            holiday_type: holiday.type,
+            is_holiday: true
+          });
+        }
+      }
 
       // Find location_id if a location is selected
       if (selectedLocation) {
@@ -119,7 +284,9 @@ const CreateTaskScreen = ({ navigation, route }) => {
         console.error('Error creating task:', error);
         Alert.alert('Error', 'Failed to create task: ' + error.message);
       } else {
-        s = 1;
+        Alert.alert('Success', 'Task created successfully!', [
+          { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
       }
     } catch (error) {
       console.error('Task creation failed:', error);
@@ -227,6 +394,15 @@ const CreateTaskScreen = ({ navigation, route }) => {
   
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  
+  useEffect(() => {
+    // Fetch holidays when year changes
+    if (selectedYear) {
+      fetchHolidays(selectedYear).then(holidayData => {
+        setHolidays(holidayData);
+      });
+    }
+  }, [selectedYear]);
   
   const getDaysInMonth = (month, year) => {
     return new Date(year, month + 1, 0).getDate();
@@ -344,6 +520,16 @@ const CreateTaskScreen = ({ navigation, route }) => {
           </Text>
           <Feather name="chevron-right" size={20} color={theme.colors.secondaryText} />
         </TouchableOpacity>
+
+        {/* Holiday Warning */}
+        {holidayWarning && (
+          <View style={[styles.warningContainer, { backgroundColor: `${holidayWarning.color}15` }]}>
+            <Feather name={holidayWarning.icon} size={16} color={holidayWarning.color} />
+            <Text style={[styles.warningText, { color: holidayWarning.color }]}>
+              {holidayWarning.message}
+            </Text>
+          </View>
+        )}
 
         {/* Location */}
         <TouchableOpacity style={styles.selectorContainer}>
@@ -469,6 +655,14 @@ const CreateTaskScreen = ({ navigation, route }) => {
               </TouchableOpacity>
             </View>
             
+            {loadingHolidays && (
+              <View style={styles.loadingContainer}>
+                <Text style={[styles.loadingText, { color: theme.colors.secondaryText }]}>
+                  Loading holidays...
+                </Text>
+              </View>
+            )}
+            
             <View style={styles.weekdaysContainer}>
               {daysOfWeek.map(day => (
                 <Text key={day} style={[styles.weekdayLabel, { color: theme.colors.secondaryText }]}>
@@ -486,10 +680,14 @@ const CreateTaskScreen = ({ navigation, route }) => {
               {/* Days of the month */}
               {Array.from({ length: getDaysInMonth(selectedMonth, selectedYear) }).map((_, index) => {
                 const day = index + 1;
+                const currentDate = new Date(selectedYear, selectedMonth, day);
                 const isSelected = dueDate && 
                   dueDate.getDate() === day && 
                   dueDate.getMonth() === selectedMonth &&
                   dueDate.getFullYear() === selectedYear;
+                
+                const holiday = isHoliday(currentDate);
+                const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
                 
                 return (
                   <TouchableOpacity
@@ -497,17 +695,24 @@ const CreateTaskScreen = ({ navigation, route }) => {
                     style={[
                       styles.dayCell,
                       isSelected && styles.selectedDayCell,
-                      isSelected && { backgroundColor: theme.colors.primary }
+                      isSelected && { backgroundColor: theme.colors.primary },
+                      holiday && styles.holidayDayCell,
+                      isWeekend && !holiday && styles.weekendDayCell
                     ]}
                     onPress={() => handleDateSelect(day)}
                   >
                     <Text style={[
                       styles.dayText,
                       { color: theme.colors.text },
-                      isSelected && styles.selectedDayText
+                      isSelected && styles.selectedDayText,
+                      holiday && styles.holidayDayText,
+                      isWeekend && !holiday && styles.weekendDayText
                     ]}>
                       {day}
                     </Text>
+                    {holiday && (
+                      <View style={styles.holidayIndicator} />
+                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -553,6 +758,22 @@ const styles = StyleSheet.create({
   descriptionInput: { height: 100, paddingTop: 8 },
   selectorContainer: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
   selectorText: { flex: 1, fontSize: 16, marginLeft: 12 },
+  
+  // Holiday warning styles
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    borderRadius: 8,
+    marginVertical: 8,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 14,
+    marginLeft: 8,
+    lineHeight: 20,
+  },
+  
   suggestionsContainer: { marginTop: 8 },
   suggestionsTitle: { fontSize: 14, fontWeight: 'bold', marginBottom: 8 },
   suggestionItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
@@ -577,18 +798,19 @@ const styles = StyleSheet.create({
     width: '100%',
     marginTop: 8,
   },
-  photoActionButton: {
+photoActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
     marginLeft: 16,
+    paddingVertical: 4,
   },
   photoActionText: {
     marginLeft: 4,
     fontSize: 14,
+    fontWeight: '500',
   },
-  
-  // Date picker styles
+
+  // Modal and Date Picker Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -598,8 +820,8 @@ const styles = StyleSheet.create({
   datePickerContainer: {
     width: '90%',
     maxWidth: 350,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    padding: 20,
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -610,62 +832,90 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   datePickerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
   },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  loadingText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
   weekdaysContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   weekdayLabel: {
-    width: 40,
+    flex: 1,
     textAlign: 'center',
     fontSize: 12,
     fontWeight: '600',
+    paddingVertical: 5,
   },
   daysGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
+    marginBottom: 20,
   },
   dayCell: {
     width: '14.28%',
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 4,
+    position: 'relative',
   },
   selectedDayCell: {
     borderRadius: 20,
   },
+  holidayDayCell: {
+    backgroundColor: '#FFE5E5',
+    borderRadius: 20,
+  },
+  weekendDayCell: {
+    backgroundColor: '#F0F8FF',
+    borderRadius: 20,
+  },
   dayText: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '500',
   },
   selectedDayText: {
-    color: 'white',
+    color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+  holidayDayText: {
+    color: '#FF3B30',
+    fontWeight: 'bold',
+  },
+  weekendDayText: {
+    color: '#007AFF',
+  },
+  holidayIndicator: {
+    position: 'absolute',
+    bottom: 2,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FF3B30',
   },
   datePickerActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 16,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   cancelButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    marginRight: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
   },
   todayButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
   },
 });
 
