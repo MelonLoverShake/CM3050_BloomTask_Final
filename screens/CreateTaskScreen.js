@@ -299,47 +299,12 @@ const CreateTaskScreen = ({ navigation, route }) => {
     
     try {
       setUploading(true);
-      
-      // For development/debugging purposes, just return the local URI
-      // This bypasses the actual upload to Supabase
       console.log('Skipping actual upload in development, using local URI for testing');
       return photoUri;
-      
-      /* Uncomment this code for production use:
-      
-      // Create a unique file path for the image
-      const fileExt = photoUri.split('.').pop();
-      const fileName = `${uuid.v4()}.${fileExt}`;
-      const fullPath = `task_photos/${fileName}`;
-      
-      // Use the Supabase SDK's upload method
-      const { data, error } = await supabase.storage
-        .from('task_attachments')
-        .upload(fullPath, {
-          uri: photoUri,
-          type: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
-          name: fileName,
-        }, {
-          cacheControl: '3600',
-          upsert: false
-        });
-      
-      if (error) {
-        throw error;
-      }
-      
-      // Get the public URL for the uploaded file
-      const { data: urlData } = supabase.storage
-        .from('task_attachments')
-        .getPublicUrl(fullPath);
-        
-      return urlData?.publicUrl || null;
-      */
-      
     } catch (error) {
       console.error('Error in photo upload:', error);
       Alert.alert('Error', 'Photo upload skipped in development mode');
-      return photoUri; // Still return the URI for testing purposes
+      return photoUri; 
     } finally {
       setUploading(false);
     }
