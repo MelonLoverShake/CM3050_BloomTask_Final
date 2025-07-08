@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { ThemeContext } from '../functions/ThemeContext';
 import { supabase } from '../lib/superbase';
 import * as ImagePicker from 'expo-image-picker';
-import uuid from 'react-native-uuid';
+import SpotifyDeepLinkService from '../functions/SpotifyDeepLinkService';
 
 const CreateTaskScreen = ({ navigation, route }) => {
   const { theme } = useContext(ThemeContext);
@@ -18,17 +18,54 @@ const CreateTaskScreen = ({ navigation, route }) => {
   const [uploading, setUploading] = useState(false);
   const [userId, setUserId] = useState(null);
   
+  // Spotify-related state
+  const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
+  const [suggestedPlaylist, setSuggestedPlaylist] = useState(null);
+  const [allPlaylists, setAllPlaylists] = useState([]);
+  
   // Holiday-related state
   const [holidays, setHolidays] = useState([]);
   const [loadingHolidays, setLoadingHolidays] = useState(false);
   const [holidayWarning, setHolidayWarning] = useState(null);
 
+  // Date picker state
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+
   // Calendarific API configuration
-  const CALENDARIFIC_API_KEY = 'GOu3avWFmorc8Q7u3KIbRyvARxDspidN'; // Replace with your actual API key
-  const COUNTRY_CODE = 'SG'; // Singapore - change based on user location
+  const CALENDARIFIC_API_KEY = 'GOu3avWFmorc8Q7u3KIbRyvARxDspidN';
+  const COUNTRY_CODE = 'SG';
+
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  
+  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Load all playlists on mount
+  useEffect(() => {
+    const playlists = SpotifyDeepLinkService.getAllPlaylists();
+    setAllPlaylists(playlists);
+  }, []);
+
+  // Update suggested playlist when location changes
+  useEffect(() => {
+    if (selectedLocation) {
+      const suggested = SpotifyDeepLinkService.getPlaylistForLocation(selectedLocation);
+      setSuggestedPlaylist(suggested);
+      
+      // Auto-select the suggested playlist if none is selected
+      if (!selectedPlaylist) {
+        setSelectedPlaylist(suggested);
+      }
+    } else {
+      setSuggestedPlaylist(null);
+    }
+  }, [selectedLocation]);
 
   useEffect(() => {
-    // Get the current user ID
     const getCurrentUser = async () => {
       const { data: { user }, error } = await supabase.auth.getUser();
       
@@ -68,7 +105,6 @@ const CreateTaskScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     (async () => {
-      // Request camera permissions
       const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
       const mediaLibraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
@@ -77,6 +113,25 @@ const CreateTaskScreen = ({ navigation, route }) => {
       }
     })();
   }, []);
+
+  // Fetch holidays when year changes
+  useEffect(() => {
+    if (selectedYear) {
+      fetchHolidays(selectedYear).then(holidayData => {
+        setHolidays(holidayData);
+      });
+    }
+  }, [selectedYear]);
+
+  // Update holiday warning when due date changes
+  useEffect(() => {
+    if (dueDate) {
+      const warning = generateHolidayWarning(dueDate);
+      setHolidayWarning(warning);
+    } else {
+      setHolidayWarning(null);
+    }
+  }, [dueDate, holidays]);
 
   // Fetch holidays from Calendarific API
   const fetchHolidays = async (year) => {
@@ -195,16 +250,6 @@ const CreateTaskScreen = ({ navigation, route }) => {
     return null;
   };
 
-  // Update holiday warning when due date changes
-  useEffect(() => {
-    if (dueDate) {
-      const warning = generateHolidayWarning(dueDate);
-      setHolidayWarning(warning);
-    } else {
-      setHolidayWarning(null);
-    }
-  }, [dueDate, holidays]);
-
   const handleCreateTask = async () => {
     if (!title.trim()) {
       Alert.alert('Error', 'Please enter a task title');
@@ -234,17 +279,33 @@ const CreateTaskScreen = ({ navigation, route }) => {
 
   const createTask = async () => {
     try {
+      // Find location data
+      const matchingLocation = locations.find(loc => loc.label === selectedLocation);
+      
       // Start with basic task data
       const taskData = {
         title,
         description,
         location_label: selectedLocation,
-        location_id: null, 
+        location_id: matchingLocation?.id || null,
         is_completed: false,
         due_date: dueDate,
         due_status: dueDate ? dueDate < new Date() : false,
         user_id: userId,
       };
+
+      // Add playlist info if selected
+      if (selectedPlaylist) {
+        taskData.playlist_info = JSON.stringify({
+          playlist_id: selectedPlaylist.id,
+          playlist_name: selectedPlaylist.name,
+          playlist_description: selectedPlaylist.description,
+          deep_link: selectedPlaylist.deep_link,
+          spotify_url: selectedPlaylist.spotify_url,
+          playlist_image: selectedPlaylist.image,
+          location_suggested: selectedPlaylist.id === suggestedPlaylist?.id
+        });
+      }
 
       // Add holiday metadata if applicable
       if (dueDate) {
@@ -255,14 +316,6 @@ const CreateTaskScreen = ({ navigation, route }) => {
             holiday_type: holiday.type,
             is_holiday: true
           });
-        }
-      }
-
-      // Find location_id if a location is selected
-      if (selectedLocation) {
-        const matchingLocation = locations.find(loc => loc.label === selectedLocation);
-        if (matchingLocation) {
-          taskData.location_id = matchingLocation.id;
         }
       }
 
@@ -291,6 +344,17 @@ const CreateTaskScreen = ({ navigation, route }) => {
     } catch (error) {
       console.error('Task creation failed:', error);
       Alert.alert('Error', 'An unexpected error occurred');
+    }
+  };
+
+  const handlePlaylistSelect = (playlist) => {
+    setSelectedPlaylist(playlist);
+    setShowPlaylistSelector(false);
+  };
+
+  const openPlaylistInSpotify = async (playlist) => {
+    if (playlist) {
+      await SpotifyDeepLinkService.openPlaylist(playlist);
     }
   };
 
@@ -350,25 +414,6 @@ const CreateTaskScreen = ({ navigation, route }) => {
     setPhoto(null);
   };
 
-  const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-  
-  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  
-  useEffect(() => {
-    // Fetch holidays when year changes
-    if (selectedYear) {
-      fetchHolidays(selectedYear).then(holidayData => {
-        setHolidays(holidayData);
-      });
-    }
-  }, [selectedYear]);
-  
   const getDaysInMonth = (month, year) => {
     return new Date(year, month + 1, 0).getDate();
   };
@@ -505,6 +550,46 @@ const CreateTaskScreen = ({ navigation, route }) => {
           <Feather name="chevron-right" size={20} color={theme.colors.secondaryText} />
         </TouchableOpacity>
 
+        {/* Playlist Selection */}
+        <TouchableOpacity 
+          style={styles.selectorContainer} 
+          onPress={() => setShowPlaylistSelector(true)}
+        >
+          <Feather name="music" size={20} color={theme.colors.primary} style={styles.inputIcon} />
+          <View style={styles.playlistSelectorContent}>
+            <Text style={[styles.selectorText, { color: selectedPlaylist ? theme.colors.text : theme.colors.secondaryText }]}>
+              {selectedPlaylist ? selectedPlaylist.name : 'Add playlist'}
+            </Text>
+            {selectedPlaylist && (
+              <Text style={[styles.playlistSubtext, { color: theme.colors.secondaryText }]}>
+                {selectedPlaylist.description}
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity 
+            onPress={() => openPlaylistInSpotify(selectedPlaylist)}
+            style={styles.spotifyButton}
+          >
+            <Feather name="external-link" size={16} color="#1DB954" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+
+        {/* Suggested Playlist Banner */}
+        {suggestedPlaylist && selectedPlaylist?.id !== suggestedPlaylist?.id && (
+          <View style={[styles.suggestionBanner, { backgroundColor: theme.colors.primary + '15' }]}>
+            <Feather name="lightbulb" size={16} color={theme.colors.primary} />
+            <Text style={[styles.suggestionText, { color: theme.colors.primary }]}>
+              Try "{suggestedPlaylist.name}" for {selectedLocation}
+            </Text>
+            <TouchableOpacity 
+              onPress={() => setSelectedPlaylist(suggestedPlaylist)}
+              style={styles.useSuggestionButton}
+            >
+              <Text style={[styles.useSuggestionText, { color: theme.colors.primary }]}>Use</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Photo Attachment */}
         <TouchableOpacity 
           style={styles.selectorContainer} 
@@ -549,7 +634,7 @@ const CreateTaskScreen = ({ navigation, route }) => {
           </View>
         )}
 
-        {/* Suggested Locations */}
+        {/* Saved Locations */}
         <View style={styles.suggestionsContainer}>
           <Text style={[styles.suggestionsTitle, { color: theme.colors.text }]}>Saved Locations</Text>
 
@@ -590,6 +675,56 @@ const CreateTaskScreen = ({ navigation, route }) => {
           {uploading ? 'Creating...' : 'Create Task'}
         </Text>
       </TouchableOpacity>
+
+      {/* Playlist Selector Modal */}
+      <Modal
+        visible={showPlaylistSelector}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowPlaylistSelector(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.playlistSelectorContainer, { backgroundColor: theme.colors.card }]}>
+            <View style={styles.playlistSelectorHeader}>
+              <Text style={[styles.playlistSelectorTitle, { color: theme.colors.text }]}>
+                Select Playlist
+              </Text>
+              <TouchableOpacity onPress={() => setShowPlaylistSelector(false)}>
+                <Feather name="x" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.playlistList}>
+              {suggestedPlaylist && (
+                <View>
+                  <Text style={[styles.sectionTitle, { color: theme.colors.primary }]}>
+                    Suggested for {selectedLocation}
+                  </Text>
+                  <PlaylistItem
+                    playlist={suggestedPlaylist}
+                    onSelect={handlePlaylistSelect}
+                    theme={theme}
+                    isSelected={selectedPlaylist?.id === suggestedPlaylist.id}
+                  />
+                </View>
+              )}
+              
+              <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                All Playlists
+              </Text>
+              {allPlaylists.map((playlist) => (
+                <PlaylistItem
+                  key={playlist.id}
+                  playlist={playlist}
+                  onSelect={handlePlaylistSelect}
+                  theme={theme}
+                  isSelected={selectedPlaylist?.id === playlist.id}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Custom Date Picker Modal */}
       <Modal
@@ -683,25 +818,17 @@ const CreateTaskScreen = ({ navigation, route }) => {
               })}
             </View>
             
-            <View style={styles.datePickerActions}>
-              <TouchableOpacity 
-                style={styles.cancelButton}
-                onPress={() => setShowDatePicker(false)}
-              >
-                <Text style={{ color: theme.colors.secondaryText }}>Cancel</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.todayButton, { backgroundColor: theme.colors.primary }]}
-                onPress={() => {
-                  const today = new Date();
-                  setDueDate(today);
-                  setShowDatePicker(false);
-                }}
-              >
-                <Text style={{ color: '#FFFFFF' }}>Today</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity 
+              style={[styles.clearDateButton, { borderColor: theme.colors.primary }]}
+              onPress={() => {
+                setDueDate(null);
+                setShowDatePicker(false);
+              }}
+            >
+              <Text style={[styles.clearDateText, { color: theme.colors.primary }]}>
+                Clear Date
+              </Text>
+            </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -709,141 +836,327 @@ const CreateTaskScreen = ({ navigation, route }) => {
   );
 };
 
+// Playlist Item Component
+const PlaylistItem = ({ playlist, onSelect, theme, isSelected }) => (
+  <TouchableOpacity
+    style={[
+      styles.playlistItem,
+      { borderColor: theme.colors.border },
+      isSelected && { backgroundColor: theme.colors.primary + '15' }
+    ]}
+    onPress={() => onSelect(playlist)}
+  >
+    <View style={styles.playlistItemContent}>
+      {playlist.image && (
+        <Image
+          source={{ uri: playlist.image }}
+          style={styles.playlistImage}
+          resizeMode="cover"
+        />
+      )}
+      <View style={styles.playlistInfo}>
+        <Text style={[styles.playlistName, { color: theme.colors.text }]}>
+          {playlist.name}
+        </Text>
+        <Text style={[styles.playlistDescription, { color: theme.colors.secondaryText }]}>
+          {playlist.description}
+        </Text>
+      </View>
+    </View>
+    {isSelected && (
+      <Feather name="check" size={20} color={theme.colors.primary} />
+    )}
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 20 },
-  backButton: { padding: 8 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold' },
-  saveButton: { padding: 8 },
-  saveButtonText: { fontWeight: '600' },
-  formSection: { margin: 16, borderRadius: 12, padding: 16, marginBottom: 8 },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E0E0E0', paddingVertical: 12 },
-  inputIcon: { marginRight: 12 },
-  input: { flex: 1, fontSize: 16, padding: 0 },
-  descriptionInput: { height: 100, paddingTop: 8 },
-  selectorContainer: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E0E0E0' },
-  selectorText: { flex: 1, fontSize: 16, marginLeft: 12 },
-  
-  // Holiday warning styles
-  warningContainer: {
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    paddingTop: 50,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  saveButton: {
+    padding: 8,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  formSection: {
+    margin: 16,
+    borderRadius: 12,
+    padding: 16,
+  },
+  inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+  },
+  inputIcon: {
+    marginRight: 12,
+    marginTop: 12,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  descriptionInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  selectorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
+    marginBottom: 16,
+  },
+  selectorText: {
+    flex: 1,
+    fontSize: 16,
+    marginLeft: 12,
+  },
+  playlistSelectorContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  playlistSubtext: {
+    fontSize: 14,
+    marginTop: 2,
+  },
+  spotifyButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  suggestionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 12,
     borderRadius: 8,
-    marginVertical: 8,
+    marginBottom: 16,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  useSuggestionButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'currentColor',
+  },
+  useSuggestionText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
   },
   warningText: {
     flex: 1,
     fontSize: 14,
     marginLeft: 8,
-    lineHeight: 20,
   },
-  
-  suggestionsContainer: { marginTop: 8 },
-  suggestionsTitle: { fontSize: 14, fontWeight: 'bold', marginBottom: 8 },
-  suggestionItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  suggestionText: { marginLeft: 8, fontSize: 16 },
-  noLocationsContainer: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  noLocationsText: { marginLeft: 8, fontSize: 16 },
-  createButton: { margin: 16, padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 32 },
-  createButtonText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 },
-  
   photoPreviewContainer: {
-    marginTop: 12,
-    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 16,
   },
   photoPreview: {
     width: '100%',
     height: 200,
     borderRadius: 8,
+    marginBottom: 12,
   },
   photoActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    width: '100%',
-    marginTop: 8,
+    justifyContent: 'space-around',
   },
-photoActionButton: {
+  photoActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 16,
-    paddingVertical: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
   },
   photoActionText: {
-    marginLeft: 4,
+    marginLeft: 8,
     fontSize: 14,
-    fontWeight: '500',
   },
-
-  // Modal and Date Picker Styles
+  suggestionsContainer: {
+    marginTop: 24,
+  },
+  suggestionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  noLocationsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  noLocationsText: {
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  createButton: {
+    margin: 16,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  playlistSelectorContainer: {
+    width: '90%',
+    maxHeight: '80%',
+    borderRadius: 16,
+    padding: 16,
+  },
+  playlistSelectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  playlistSelectorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  playlistList: {
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    marginTop: 8,
+  },
+  playlistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    marginBottom: 8,
+    borderRadius: 8,
+  },
+  playlistItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  playlistImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  playlistInfo: {
+    flex: 1,
+  },
+  playlistName: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  playlistDescription: {
+    fontSize: 14,
+  },
   datePickerContainer: {
     width: '90%',
-    maxWidth: 350,
     borderRadius: 16,
-    padding: 20,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    padding: 16,
+    maxHeight: '80%',
   },
   datePickerHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   datePickerTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   loadingContainer: {
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 16,
   },
   loadingText: {
     fontSize: 14,
-    fontStyle: 'italic',
   },
   weekdaysContainer: {
     flexDirection: 'row',
-    marginBottom: 10,
+    justifyContent: 'space-around',
+    marginBottom: 8,
   },
   weekdayLabel: {
-    flex: 1,
-    textAlign: 'center',
     fontSize: 12,
     fontWeight: '600',
-    paddingVertical: 5,
+    width: 40,
+    textAlign: 'center',
   },
   daysGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 20,
+    justifyContent: 'flex-start',
   },
   dayCell: {
     width: '14.28%',
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 4,
+    borderRadius: 8,
     position: 'relative',
   },
   selectedDayCell: {
-    borderRadius: 20,
+    backgroundColor: '#007AFF',
   },
   holidayDayCell: {
-    backgroundColor: '#FFE5E5',
-    borderRadius: 20,
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
   },
   weekendDayCell: {
-    backgroundColor: '#F0F8FF',
-    borderRadius: 20,
+    backgroundColor: 'rgba(66, 165, 245, 0.1)',
   },
   dayText: {
     fontSize: 16,
@@ -851,36 +1164,36 @@ photoActionButton: {
   },
   selectedDayText: {
     color: '#FFFFFF',
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   holidayDayText: {
-    color: '#FF3B30',
-    fontWeight: 'bold',
+    color: '#FF6B6B',
+    fontWeight: '600',
   },
   weekendDayText: {
-    color: '#007AFF',
+    color: '#42A5F5',
   },
   holidayIndicator: {
     position: 'absolute',
     bottom: 2,
+    right: 2,
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF6B6B',
   },
-  datePickerActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cancelButton: {
+  clearDateButton: {
+    marginTop: 16,
     paddingVertical: 12,
-    paddingHorizontal: 20,
-  },
-  todayButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    alignSelf: 'center',
+  },
+  clearDateText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 
