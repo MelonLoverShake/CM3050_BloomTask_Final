@@ -7,6 +7,22 @@ import * as ImagePicker from 'expo-image-picker';
 import SpotifyDeepLinkService from '../functions/SpotifyDeepLinkService';
 
 const CreateTaskScreen = ({ navigation, route }) => {
+
+  // Function to get country code from coordinates
+const getCountryCodeFromCoordinates = async (latitude, longitude) => {
+  try {
+    // Using a free geocoding service to get country code
+    const response = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+    );
+    const data = await response.json();
+    return data.countryCode || 'SG'; // Default to SG if unable to determine
+  } catch (error) {
+    console.error('Error getting country code:', error);
+    return 'SG'; // Default fallback
+  }
+};
+
   const { theme } = useContext(ThemeContext);
   const [locations, setLocations] = useState([]);
   const [selectedLocation, setSelectedLocation] = useState('');
@@ -17,6 +33,10 @@ const CreateTaskScreen = ({ navigation, route }) => {
   const [photo, setPhoto] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [userId, setUserId] = useState(null);
+
+  // Location state - Get from navigation params
+  const [userLocation, setUserLocation] = useState(route.params?.userLocation || null);
+  const [locationPermission, setLocationPermission] = useState(route.params?.locationPermission || null);
   
   // Spotify-related state
   const [showPlaylistSelector, setShowPlaylistSelector] = useState(false);
@@ -35,7 +55,7 @@ const CreateTaskScreen = ({ navigation, route }) => {
 
   // Calendarific API configuration
   const CALENDARIFIC_API_KEY = 'GOu3avWFmorc8Q7u3KIbRyvARxDspidN';
-  const COUNTRY_CODE = 'SG';
+  const [countryCode, setCountryCode] = useState('SG'); // Dynamic country code
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -114,14 +134,14 @@ const CreateTaskScreen = ({ navigation, route }) => {
     })();
   }, []);
 
-  // Fetch holidays when year changes
-  useEffect(() => {
-    if (selectedYear) {
-      fetchHolidays(selectedYear).then(holidayData => {
-        setHolidays(holidayData);
-      });
-    }
-  }, [selectedYear]);
+  // Fetch holidays when year or country changes
+useEffect(() => {
+  if (selectedYear && countryCode) {
+    fetchHolidays(selectedYear).then(holidayData => {
+      setHolidays(holidayData);
+    });
+  }
+}, [selectedYear, countryCode]);
 
   // Update holiday warning when due date changes
   useEffect(() => {
@@ -133,46 +153,65 @@ const CreateTaskScreen = ({ navigation, route }) => {
     }
   }, [dueDate, holidays]);
 
-  // Fetch holidays from Calendarific API
-  const fetchHolidays = async (year) => {
-    if (!CALENDARIFIC_API_KEY) {
-      console.warn('Calendarific API key not configured');
-      return [];
-    }
-
-    try {
-      setLoadingHolidays(true);
-      const response = await fetch(
-        `https://calendarific.com/api/v2/holidays?api_key=${CALENDARIFIC_API_KEY}&country=${COUNTRY_CODE}&year=${year}&type=national,local`
+  // Determine country code from user location
+useEffect(() => {
+  const determineCountryCode = async () => {
+    if (userLocation?.coords && locationPermission === 'granted') {
+      const code = await getCountryCodeFromCoordinates(
+        userLocation.coords.latitude,
+        userLocation.coords.longitude
       );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.meta.code === 200) {
-        return data.response.holidays.map(holiday => ({
-          name: holiday.name,
-          description: holiday.description,
-          date: new Date(holiday.date.iso),
-          type: holiday.type,
-          primary_type: holiday.primary_type,
-          country: holiday.country,
-          locations: holiday.locations
-        }));
-      } else {
-        console.error('Calendarific API error:', data.meta.error_detail);
-        return [];
-      }
-    } catch (error) {
-      console.error('Error fetching holidays:', error);
-      return [];
-    } finally {
-      setLoadingHolidays(false);
+      setCountryCode(code);
+      console.log('Country code determined:', code);
+    } else {
+      // Fallback to SG if no location access
+      setCountryCode('SG');
     }
   };
+
+  determineCountryCode();
+}, [userLocation, locationPermission]);
+
+ // Fetch holidays from Calendarific API
+const fetchHolidays = async (year) => {
+  if (!CALENDARIFIC_API_KEY) {
+    console.warn('Calendarific API key not configured');
+    return [];
+  }
+
+  try {
+    setLoadingHolidays(true);
+    const response = await fetch(
+      `https://calendarific.com/api/v2/holidays?api_key=${CALENDARIFIC_API_KEY}&country=${countryCode}&year=${year}&type=national,local`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.meta.code === 200) {
+      return data.response.holidays.map(holiday => ({
+        name: holiday.name,
+        description: holiday.description,
+        date: new Date(holiday.date.iso),
+        type: holiday.type,
+        primary_type: holiday.primary_type,
+        country: holiday.country,
+        locations: holiday.locations
+      }));
+    } else {
+      console.error('Calendarific API error:', data.meta.error_detail);
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching holidays:', error);
+    return [];
+  } finally {
+    setLoadingHolidays(false);
+  }
+};
 
   // Check if a date is a holiday
   const isHoliday = (date) => {

@@ -217,9 +217,12 @@ const fetchCategories = async () => {
   };
 
   const navigateToCreateTask = () => {
-    // Pass the current location to the CreateTask screen if available
-    navigation.navigate('CreateTask', { userLocation: userLocation });
-  };
+  // Pass the current location to the CreateTask screen if available
+  navigation.navigate('CreateTask', { 
+    userLocation: userLocation,
+    locationPermission: locationPermission 
+  });
+};
   
   const navigateToTaskDetail = (taskId) => {
     navigation.navigate('TaskDetail', { taskId, userLocation: userLocation });
